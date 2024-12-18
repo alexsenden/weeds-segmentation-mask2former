@@ -7,6 +7,7 @@ from collections import deque
 
 import cv2
 import torch
+import numpy as np
 
 from detectron2.data import MetadataCatalog
 from detectron2.engine.defaults import DefaultPredictor
@@ -57,9 +58,19 @@ class VisualizationDemo(object):
             )
         else:
             if "sem_seg" in predictions:
-                vis_output = visualizer.draw_sem_seg(
-                    predictions["sem_seg"].argmax(dim=0).to(self.cpu_device)
-                )
+                class_predictions = predictions["sem_seg"].argmax(dim=0).cpu().detach().numpy()
+                image_shape = class_predictions.shape
+                vis_output = np.zeros((image_shape[0], image_shape[1], 3))
+                for y in range(image_shape[0]):
+                    for x in range(image_shape[1]):
+                        if class_predictions[y, x] == 1:
+                            vis_output[y, x] = np.array([0, 128, 0])
+                        if class_predictions[y, x] == 2:
+                            vis_output[y, x] = np.array([0, 0, 128])
+
+                # vis_output = visualizer.draw_sem_seg(
+                #     predictions["sem_seg"].argmax(dim=0).to(self.cpu_device)
+                # )
             if "instances" in predictions:
                 instances = predictions["instances"].to(self.cpu_device)
                 vis_output = visualizer.draw_instance_predictions(predictions=instances)

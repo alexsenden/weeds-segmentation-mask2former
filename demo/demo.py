@@ -26,10 +26,18 @@ from detectron2.utils.logger import setup_logger
 from mask2former import add_maskformer2_config
 from predictor import VisualizationDemo
 
+from datasets.prepare_nassar2020 import prepare_nassar2020
+
+prepare_nassar2020()
 
 # constants
 WINDOW_NAME = "mask2former demo"
 
+CONFIG = {
+    "length": 512,
+    "overlap_length": 256,
+    "half_overlap": 128,
+}
 
 def setup_cfg(args):
     # load config from file and command-line arguments
@@ -94,6 +102,53 @@ def test_opencv_video_format(codec, file_ext):
         if os.path.isfile(filename):
             return True
         return False
+    
+def tile_images(image):
+    tiles = []
+    
+    for y in range(0, image.shape[0] - CONFIG["overlap_length"] - 1, CONFIG["overlap_length"]):
+        for x in range(0, image.shape[1] - CONFIG["overlap_length"] - 1, CONFIG["overlap_length"]):
+            adjustedX = min(image.shape[1] - CONFIG["length"], x)
+            adjustedY = min(image.shape[0] - CONFIG["length"], y)
+            tiles.append(image[adjustedY:adjustedY + CONFIG["length"], adjustedX:adjustedX + CONFIG["length"]])
+            
+    return tiles
+    
+def reconstruct(tiles, original_width, original_height):
+    x = 0
+    y = 0
+    output = np.zeros((original_height, original_width, 3))
+
+    for tile in tiles:
+        if x + CONFIG["overlap_length"] >= original_width:
+            x = 0
+            y += CONFIG["overlap_length"]
+        if y + CONFIG["overlap_length"] >= original_height:
+            print(f"{y} too large for original height {original_height}")
+        
+        startX = CONFIG["half_overlap"]
+        if x > original_width - CONFIG["length"]:
+            startX = CONFIG["length"] - (original_width - x - CONFIG["half_overlap"])
+
+        startY = CONFIG["half_overlap"]
+        if y > original_height - CONFIG["length"]:
+            startY = CONFIG["length"] - (original_height - y - CONFIG["half_overlap"])
+        
+        outputStartX = x + CONFIG["half_overlap"]
+        if x == 0:
+            outputStartX = 0
+            startX = 0
+            
+        outputStartY = y + CONFIG["half_overlap"]
+        if y == 0:
+            outputStartY = 0
+            startY = 0
+
+        output[outputStartY:min(y + CONFIG["length"], original_height), outputStartX:min(x + CONFIG["length"], original_width)] = tile[startY:, startX:]
+
+        x += CONFIG["overlap_length"]
+        
+    return output
 
 
 if __name__ == "__main__":
@@ -114,81 +169,20 @@ if __name__ == "__main__":
         for path in tqdm.tqdm(args.input, disable=not args.output):
             # use PIL, to be consistent with evaluation
             img = read_image(path, format="BGR")
+            
+            original_height, original_width, _ = img.shape
+            images = tile_images(img)
+            mask_tiles = []
+            
             start_time = time.time()
-            predictions, visualized_output = demo.run_on_image(img)
-            logger.info(
-                "{}: {} in {:.2f}s".format(
-                    path,
-                    "detected {} instances".format(len(predictions["instances"]))
-                    if "instances" in predictions
-                    else "finished",
-                    time.time() - start_time,
-                )
-            )
+            
+            for tile in images:
+                mask_tiles.append(demo.run_on_image(tile)[1])
+                
+            reconstructed_mask = reconstruct(mask_tiles, original_width, original_height)
 
-            if args.output:
-                if os.path.isdir(args.output):
-                    assert os.path.isdir(args.output), args.output
-                    out_filename = os.path.join(args.output, os.path.basename(path))
-                else:
-                    assert len(args.input) == 1, "Please specify a directory with args.output"
-                    out_filename = args.output
-                visualized_output.save(out_filename)
+            if args.output and os.path.isdir(args.output):
+                out_filename = os.path.join(args.output, os.path.basename(path))
+                cv2.imwrite(out_filename, reconstructed_mask)
             else:
-                cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-                cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
-                if cv2.waitKey(0) == 27:
-                    break  # esc to quit
-    elif args.webcam:
-        assert args.input is None, "Cannot have both --input and --webcam!"
-        assert args.output is None, "output not yet supported with --webcam!"
-        cam = cv2.VideoCapture(0)
-        for vis in tqdm.tqdm(demo.run_on_video(cam)):
-            cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-            cv2.imshow(WINDOW_NAME, vis)
-            if cv2.waitKey(1) == 27:
-                break  # esc to quit
-        cam.release()
-        cv2.destroyAllWindows()
-    elif args.video_input:
-        video = cv2.VideoCapture(args.video_input)
-        width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        frames_per_second = video.get(cv2.CAP_PROP_FPS)
-        num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-        basename = os.path.basename(args.video_input)
-        codec, file_ext = (
-            ("x264", ".mkv") if test_opencv_video_format("x264", ".mkv") else ("mp4v", ".mp4")
-        )
-        if codec == ".mp4v":
-            warnings.warn("x264 codec not available, switching to mp4v")
-        if args.output:
-            if os.path.isdir(args.output):
-                output_fname = os.path.join(args.output, basename)
-                output_fname = os.path.splitext(output_fname)[0] + file_ext
-            else:
-                output_fname = args.output
-            assert not os.path.isfile(output_fname), output_fname
-            output_file = cv2.VideoWriter(
-                filename=output_fname,
-                # some installation of opencv may not support x264 (due to its license),
-                # you can try other format (e.g. MPEG)
-                fourcc=cv2.VideoWriter_fourcc(*codec),
-                fps=float(frames_per_second),
-                frameSize=(width, height),
-                isColor=True,
-            )
-        assert os.path.isfile(args.video_input)
-        for vis_frame in tqdm.tqdm(demo.run_on_video(video), total=num_frames):
-            if args.output:
-                output_file.write(vis_frame)
-            else:
-                cv2.namedWindow(basename, cv2.WINDOW_NORMAL)
-                cv2.imshow(basename, vis_frame)
-                if cv2.waitKey(1) == 27:
-                    break  # esc to quit
-        video.release()
-        if args.output:
-            output_file.release()
-        else:
-            cv2.destroyAllWindows()
+                assert len(args.input) == 1, "Please specify a directory with args.output"

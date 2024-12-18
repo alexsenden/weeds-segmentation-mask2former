@@ -58,6 +58,8 @@ from mask2former import (
     add_maskformer2_config,
 )
 
+from datasets.prepare_nassar2020 import prepare_nassar2020
+
 
 class Trainer(DefaultTrainer):
     """
@@ -318,6 +320,8 @@ def main(args):
 if __name__ == "__main__":
     args = default_argument_parser().parse_args()
     print("Command Line Args:", args)
+    prepare_nassar2020()
+    print(MetadataCatalog.get("nassar2020_train"))
     launch(
         main,
         args.num_gpus,

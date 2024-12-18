@@ -1,0 +1,15 @@
+_BASE_: ../maskformer2_R50_bs16_160k.yaml
+MODEL:
+  BACKBONE:
+    NAME: "D2SwinTransformer"
+  SWIN:
+    EMBED_DIM: 96
+    DEPTHS: [2, 2, 6, 2]
+    NUM_HEADS: [3, 6, 12, 24]
+    WINDOW_SIZE: 7
+    APE: False
+    DROP_PATH_RATE: 0.3
+    PATCH_NORM: True
+  WEIGHTS: "pretrain/Swin-T_ADE20K.pkl"
+  PIXEL_MEAN: [129.50954387, 134.01509782, 107.08335654]
+  PIXEL_STD: [35.7925329, 36.89880261, 33.88936571]

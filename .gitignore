@@ -1,5 +1,5 @@
 # output dir
-output
+/output
 instant_test_output
 inference_test_output
 
@@ -51,3 +51,12 @@ _darcs
 /projects/*/datasets
 /models
 /snippet
+
+# image files
+*.JPG
+*.jpg
+*.PNG
+*.png
+
+# allow the teaser image
+!teaser.png
